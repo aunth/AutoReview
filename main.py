@@ -47,28 +47,24 @@ class Review(BaseModel):
 
     def analyze_files(self, gpt_response: str):
         try:
-            # Find the start index of each section in the GPT response
             downsides_start = gpt_response.find("**Downsides/Comments**")
             rating_start = gpt_response.find("**Rating**")
             conclusion_start = gpt_response.find("**Conclusion**")
             
-            # Extract Downsides/Comments
             if downsides_start != -1 and rating_start != -1:
-                downsides_start += len("**Downsides/Comments**") + 1  # Move to the end of the header
+                downsides_start += len("**Downsides/Comments:**") + 1
                 self.downsides_comments = gpt_response[downsides_start:rating_start].strip()
             else:
                 self.downsides_comments = "Downsides/Comments section not found."
             
-            # Extract Rating
             if rating_start != -1 and conclusion_start != -1:
-                rating_start += len("**Rating**") + 1 # Move to the end of the header
+                rating_start += len("**Rating:**") + 1
                 self.rating = gpt_response[rating_start:conclusion_start].strip()
             else:
                 self.rating = "Rating section not found."
             
-            # Extract Conclusion
             if conclusion_start != -1:
-                conclusion_start += len("**Conclusion**") + 1 # Move to the end of the header
+                conclusion_start += len("**Conclusion:**") + 1
                 self.conclusion = gpt_response[conclusion_start:].strip()
             else:
                 self.conclusion = "Conclusion section not found."
@@ -120,20 +116,6 @@ def get_github_repo_contents(owner: str, repo: str, path=''):
     except Exception as e:
         logger.error(f"Exception while fetching GitHub repo contents: {e}")
         return None
-    
-
-def fetch_file_content(owner: str, repo: str, file_path: str) -> str:
-    file_api_url = f'https://api.github.com/repos/{owner}/{repo}/contents/{file_path}'
-    headers = {
-        'Authorization': f'token {os.getenv("GITHUB_TOKEN")}',
-        'Accept': 'application/vnd.github.v3.raw'
-    }
-    response = requests.get(file_api_url, headers=headers)
-    if response.status_code == 200:
-        return response.text
-    else:
-        logger.error(f"Failed to fetch file content for {file_path}: {response.status_code}")
-        return None
 
 
 def fetch_file_content(owner: str, repo: str, file_path: str) -> str:
@@ -173,6 +155,7 @@ async def review_code(request_body: UserValue):
 
     review = Review(files=[file['path'] for file in contents])
     gpt_response = await get_review(contents, request_body.user_level, request_body.assignment_description)
+    logger.info(gpt_response)
     review_data = review.create_review(gpt_response)
 
     redis_client.setex(cache_key, 86400, str(review_data))
@@ -180,7 +163,7 @@ async def review_code(request_body: UserValue):
 
 
 async def get_review(files: list[dict], user_level: str, assignment_description: str) -> str:
-    api_key = os.getenv('OPENAI_API_KEY')
+    api_key = os.getenv("OPENAI_API_KEY")
     url = "https://api.openai.com/v1/chat/completions"
     headers = {
         "Content-Type": "application/json",
@@ -191,24 +174,22 @@ async def get_review(files: list[dict], user_level: str, assignment_description:
         for file in files
     )
     instructions = f"""
-    You are a code review assistant. Your task is to review the code from the following files based on the assignment description provided below. It is **crucial** that your feedback strictly follows the specified format outlined below:
-
+    You are a highly skilled code review assistant. Your task is to review the overall code quality of the project files listed below based on the assignment description provided. Your feedback should strictly adhere to the following structured format:
+    
     **Assignment Description**: {assignment_description}
-
+    
     **Files**:
     {file_descriptions}
-
-    **User Level**: {user_level}
-
-    **Feedback Structure** (respond **exactly** in this format):
-    - **Downsides/Comments**: Identify issues and provide suggestions for improvement.
-    - **Rating**: Should be in format x/10 where x is your grade
-    - **Conclusion**: Summarize your overall feedback.
-
-    Please ensure that your response is **detailed**, **constructive**, and adheres **exactly** to this structure. Responses that do not follow this format will not be accepted.
+    
+    **User Skill Level**: {user_level}
+    
+    **Feedback Structure** (respond **exactly** in this format - **header**: result). You shouldn't use any other header to this response.
+    - **Downsides/Comments**: Provide a comprehensive overview of any issues and areas for improvement across the entire project. Be specific but concise.
+    - **Rating**: Assign a rating in the format x/10, where x reflects the overall quality of the project.
+    - **Conclusion**: Summarize your feedback and outline major recommendations for improving the project as a whole.
+    
+    Ensure your response is **thorough**, **constructive**, and **strictly adheres** to this structure. Any deviation from this format will render your response invalid.
     """
-
-
 
     data = {
         "model": "gpt-4-turbo",
